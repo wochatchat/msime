@@ -13,9 +13,9 @@ on:
     branches: [develop]
   workflow_dispatch:
 
-# 与 ci-platforms.yml 同名并发组：同一 PR 上不会和它互相踩（fork 上后者本来就排不到）。
+# fork 上 Native Platform CI（depot runner）永远排队且与本 workflow 无关，用独立并发组互不干扰。
 concurrency:
-  group: platform-ci-Native Platform CI-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref_name }}
+  group: android-compile-check-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref_name }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
