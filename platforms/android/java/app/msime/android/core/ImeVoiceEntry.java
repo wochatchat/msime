@@ -117,6 +117,26 @@ final class ImeVoiceEntry {
         return platformAvailable ? Engine.PLATFORM : null;
     }
 
+    /**
+     * 自动聆听能不能直接在键区里开始（#11601）：按同样的优先级挑引擎，但系统识别服务不算——键盘刚弹出时它经常起不来或抢焦点，自动开始失败没有人工兜底，只会每次弹窗打扰。参数与 {@link #choose} 一致；返回 null 时自动聆听保持沉默，用户仍可用点按或长按入口走系统识别。
+     */
+    static Engine chooseAuto(boolean localConfigured, boolean streamingConfigured, boolean online,
+                             boolean offlineFallback, boolean fallbackInstalled,
+                             boolean uploadConfigured) {
+        Engine engine = choose(localConfigured, streamingConfigured, online, offlineFallback,
+            fallbackInstalled, uploadConfigured, false);
+        return engine == Engine.PLATFORM ? null : engine;
+    }
+
+    /** 自动聆听面板的第一句提示：按引擎讲怎么结束，用户开口前的预期和点按入口一致。 */
+    private static String autoHint(Engine engine) {
+        return switch (engine) {
+            case UPLOAD -> "说完后点「说完了」，识别后自动上屏";
+            case STREAMING -> "说完点「说完了」或按住空格结束";
+            default -> "停顿后自动上屏，也可点「说完了」";
+        };
+    }
+
     private JSONObject voicePreferences() {
         JSONObject preferences = s.preferencesSnapshot == null ? null
             : s.preferencesSnapshot.optJSONObject("preferences");
@@ -124,7 +144,7 @@ final class ImeVoiceEntry {
         return voice == null ? new JSONObject() : voice;
     }
 
-    /** 有可用的、经过验证的网络；读不到网络状态（缺少权限等）时按在线处理，不贸然回退。 */
+    /** 有可用的、经过验证的网络；读不到网络状态（缺少权限等）时按在线处理，不贸然回退。自动聆听经 {@link #onlineForAutoListen} 复用同一判断。 */
     private boolean online() {
         try {
             ConnectivityManager manager = s.getSystemService(ConnectivityManager.class);
@@ -138,8 +158,18 @@ final class ImeVoiceEntry {
         }
     }
 
-    /** 在键区里开始识别；返回 false 表示交回原来的识别窗口流程。正在聆听时再按一次语音键即结束录音、开始出结果。 */
+    /** 自动聆听用的在线判断：与 {@link #online} 相同，只是包内可见。 */
+    boolean onlineForAutoListen() {
+        return online();
+    }
+
+    /** 在键区里开始识别；返回 false 表示交回原来的识别窗口流程。正在聆听时再按语音键即结束录音、开始出结果。自动聆听（#11601）走同一个方法，只有提示文案换成自动开场那句。 */
     boolean startInKeyboard(ViewGroup keyArea) {
+        return startInKeyboard(keyArea, false);
+    }
+
+    /** {@code autoListen} 为 true 时这次聆听由键盘弹出自动开始：面板第一句换成自动开场的提示，其余与点按入口完全一致。 */
+    boolean startInKeyboard(ViewGroup keyArea, boolean autoListen) {
         if (keyArea == null) return false;
         if (listening != null) {
             finishListening();
@@ -191,6 +221,8 @@ final class ImeVoiceEntry {
         VoiceRecognitionActivity.Polish polish = configured.polish();
         VoiceRecognitionActivity.Streaming stream = configured.streaming();
         s.hideVoiceEmptyNotice();
+        // 自动聆听与点按入口共用这个面板，只有第一句提示不同：它没有「说完了」旁边的上下文，直接讲怎么结束。
+        if (autoListen) listening.setHint(autoHint(engine));
         if (engine == Engine.PLATFORM) {
             if (startPlatform(session, startedAt, language, polish)) return true;
             // 系统识别服务连创建都失败时退回识别窗口，至少还有原来的流程可用。
@@ -366,6 +398,11 @@ final class ImeVoiceEntry {
     void plainIndicator(long before) {
         if (generation == before || listening == null) return;
         listening.setMascotEnabled(false);
+    }
+
+    /** 此刻正在键区里聆听（自动聆听到点时不再重复开始；手动入口开始后迟到的自动回调也作废）。 */
+    boolean listeningActive() {
+        return listening != null;
     }
 
     /** 长按空格开始的按住说话：本次本地识别不用判停灵敏度，阈值保持 0.5（松手结束，调高阈值只会丢轻声的字）。 */

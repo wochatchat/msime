@@ -232,6 +232,12 @@ public final class VoicePage extends ReloadingDetailPage {
             TRIGGER_LABELS[trigger],
             () -> pickTrigger(trigger, triggerRow[0])).help(triggerHint);
 
+        recognition.toggle("进入输入框自动聆听", null,
+            local.bool(AndroidLocalSettings.VOICE_AUTO_LISTEN),
+            checked -> KeyboardSheets.saveLocal(this, AndroidLocalSettings.VOICE_AUTO_LISTEN,
+                checked, this::reload, this::reload))
+            .help("键盘弹出后直接开始聆听，不用先点一下；只在配置了本机模型、豆包或上传式服务时生效，系统识别服务不自动开始。密码框不自动录音");
+
         recognition.slider("本地停顿时间", null,
             AndroidLocalSettings.VOICE_PAUSE_MIN_MILLIS, AndroidLocalSettings.VOICE_PAUSE_MAX_MILLIS, 100,
             local.integer(AndroidLocalSettings.VOICE_PAUSE_MILLIS), value -> value + " 毫秒",

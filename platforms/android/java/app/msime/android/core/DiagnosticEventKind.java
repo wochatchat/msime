@@ -21,6 +21,8 @@ public enum DiagnosticEventKind {
     VOICE_ENGINE_PLATFORM("voice_engine_platform", false),
     VOICE_ENGINE_HTTP("voice_engine_http", false),
     VOICE_ACTIVITY_LAUNCH("voice_activity_launch", false),
+    /** 自动聆听开始了一次键区采集（#11601），只进本机诊断包。 */
+    VOICE_AUTO_LISTEN("voice_auto_listen", false),
     VOICE_LOCAL_MODEL_CHECK("voice_local_model_check", false),
     VOICE_LOCAL_RUNTIME_CHECK("voice_local_runtime_check", false),
     VOICE_LOCAL_RECORDER_OPEN("voice_local_recorder_open", false),
