@@ -31,7 +31,7 @@ pub const MAX_CRASH_STACK_BYTES: usize = 16 * 1024;
 const MAX_LINE_BYTES: usize = 32 * 1024;
 
 /// 诊断包固定事件种类；输入失败类别仅供本地导出，云端上传器另按服务契约过滤。
-pub const EVENT_KINDS: [&str; 91] = [
+pub const EVENT_KINDS: [&str; 92] = [
     "key_down",
     "key_up",
     "candidate_shown",
@@ -51,6 +51,7 @@ pub const EVENT_KINDS: [&str; 91] = [
     "voice_engine_platform",
     "voice_engine_http",
     "voice_activity_launch",
+    "voice_auto_listen",
     "voice_local_model_check",
     "voice_local_runtime_check",
     "voice_local_recorder_open",

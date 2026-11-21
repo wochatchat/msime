@@ -62,7 +62,7 @@ public final class ImePrivacyGateSmoke {
             "voice_engine_streaming",
             "voice_engine_platform",
             "voice_engine_http",
-            "voice_activity_launch",
+            "voice_activity_launch", "voice_auto_listen",
             "voice_local_model_check",
             "voice_local_runtime_check",
             "voice_local_recorder_open",
