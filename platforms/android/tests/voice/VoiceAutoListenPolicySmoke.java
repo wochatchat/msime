@@ -41,5 +41,6 @@ public final class VoiceAutoListenPolicySmoke {
         // 延迟给首帧渲染和输入框落地留时间：不能是 0（窗口还没显示），也不该太长。
         check(VoiceAutoListenPolicy.START_DELAY_MILLIS > 0 && VoiceAutoListenPolicy.START_DELAY_MILLIS <= 1000,
             "自动开始延迟在一秒以内");
+        System.out.println("VoiceAutoListenPolicySmoke passed");
     }
 }
