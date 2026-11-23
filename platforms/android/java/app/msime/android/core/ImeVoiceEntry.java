@@ -137,6 +137,9 @@ final class ImeVoiceEntry {
         };
     }
 
+    /** 自动聆听到点前先画进第一帧的面板：录音还没开始，用户取消后整个作废（见 {@link #preShowAutoPanel}）。 */
+    private boolean autoPanelPending;
+
     private JSONObject voicePreferences() {
         JSONObject preferences = s.preferencesSnapshot == null ? null
             : s.preferencesSnapshot.optJSONObject("preferences");
@@ -163,7 +166,7 @@ final class ImeVoiceEntry {
         return online();
     }
 
-    /** 在键区里开始识别；返回 false 表示交回原来的识别窗口流程。正在聆听时再按语音键即结束录音、开始出结果。自动聆听（#11601）走同一个方法，只有提示文案换成自动开场那句。 */
+    /** 在键区里开始识别；返回 false 表示交回原来的识别窗口流程。正在聆听时再按语音键即结束录音、开始出结果。自动聆听（#11601）走同一个方法，只有提示文案换成自动开场那句；面板已由 {@link #preShowAutoPanel} 画进第一帧时直接在它上面开始，不再重建键区。 */
     boolean startInKeyboard(ViewGroup keyArea) {
         return startInKeyboard(keyArea, false);
     }
@@ -171,9 +174,16 @@ final class ImeVoiceEntry {
     /** {@code autoListen} 为 true 时这次聆听由键盘弹出自动开始：面板第一句换成自动开场的提示，其余与点按入口完全一致。 */
     boolean startInKeyboard(ViewGroup keyArea, boolean autoListen) {
         if (keyArea == null) return false;
+        boolean freshPanel = true;
         if (listening != null) {
-            finishListening();
-            return true;
+            if (autoListen && autoPanelPending) {
+                // 自动聆听的面板已随第一帧露出：这次回调是在它上面开始录音，不是再按一次语音键。
+                freshPanel = false;
+                autoPanelPending = false;
+            } else {
+                finishListening();
+                return true;
+            }
         }
         if (s.checkSelfPermission(android.Manifest.permission.RECORD_AUDIO)
                 != PackageManager.PERMISSION_GRANTED) return false;
@@ -209,7 +219,7 @@ final class ImeVoiceEntry {
             && !EditorPolicy.password(s.editorInputType);
         // 记下开始聆听时的输入位置；结果出来时位置变了就不直接上屏。
         s.captureVoiceTarget();
-        show(keyArea);
+        if (freshPanel) show(keyArea);
         uploadStopped = false;
         long session = ++generation;
         punctuationMode = configured.punctuationMode();
@@ -403,6 +413,51 @@ final class ImeVoiceEntry {
     /** 此刻正在键区里聆听（自动聆听到点时不再重复开始；手动入口开始后迟到的自动回调也作废）。 */
     boolean listeningActive() {
         return listening != null;
+    }
+
+    /**
+     * 自动聆听的第一帧面板：把键区原样换成聆听面板但不开始录音，录音仍等服务在延迟到点时开始（{@link MSIMEInputService#runAutoListen}）。面板随第一帧一起出现，键盘不再先闪一下全键盘；到点前的取消（窗口收起、换输入框、用户收走面板）都走 {@link #cancelAutoPanel}，排着的自动开始随之作废。已经带着面板或录音时不动，返回 false 交给延迟回调按老流程开始。
+     */
+    boolean preShowAutoPanel(ViewGroup keyArea, Engine engine) {
+        if (keyArea == null || engine == null || listening != null) return false;
+        if (s.checkSelfPermission(android.Manifest.permission.RECORD_AUDIO)
+                != PackageManager.PERMISSION_GRANTED) return false;
+        autoPanelPending = true;
+        if (keyArea.getHeight() > 0) {
+            paintAutoPanel(keyArea, engine);
+            return true;
+        }
+        // 键盘这次弹出前还没量过尺寸（进程起来后的第一次弹出）：覆盖层必须与键区等高并配上负边距
+        // （见 show），拿不到高度硬画会把键盘窗口撑高。挂一次性布局监听等这次布局落地再画，面板晚
+        // 一帧出现，全键盘也只闪这一帧；到点回调（350ms）一定在布局之后。
+        keyArea.addOnLayoutChangeListener(new View.OnLayoutChangeListener() {
+            @Override public void onLayoutChange(View changed, int left, int top, int right, int bottom,
+                                                 int oldLeft, int oldTop, int oldRight, int oldBottom) {
+                keyArea.removeOnLayoutChangeListener(this);
+                if (autoPanelPending && listening == null && !recognizing && keyArea.getHeight() > 0)
+                    paintAutoPanel(keyArea, engine);
+            }
+        });
+        return true;
+    }
+
+    /** 把自动聆听的空面板画进键区：隐藏键行、盖上覆盖层，第一句提示换成自动开场文案。 */
+    private void paintAutoPanel(ViewGroup keyArea, Engine engine) {
+        show(keyArea);
+        listening.setHint(autoHint(engine));
+    }
+
+    /** 预画的自动聆听面板还在（录音未开始、没被取消）。 */
+    boolean autoPanelPending() {
+        return autoPanelPending;
+    }
+
+    /** 作废预画的自动聆听面板：面板已画就收走并恢复键区，只挂了布局监听还没画时仅清掉待画标记（监听落地时看到标记已清就不画）。只认这次自动聆听预画的状态，手动入口和出结果阶段的会话不碰。 */
+    void cancelAutoPanel() {
+        if (!autoPanelPending) return;
+        autoPanelPending = false;
+        if (listening == null || recognizing) return;
+        cancel();
     }
 
     /** 长按空格开始的按住说话：本次本地识别不用判停灵敏度，阈值保持 0.5（松手结束，调高阈值只会丢轻声的字）。 */
@@ -1074,6 +1129,7 @@ final class ImeVoiceEntry {
     private void dismiss() {
         if (silenceStop != null) s.main.removeCallbacks(silenceStop);
         silenceStop = null;
+        autoPanelPending = false;
         View panel = listeningPanel;
         ViewGroup parent = host;
         listeningPanel = null;

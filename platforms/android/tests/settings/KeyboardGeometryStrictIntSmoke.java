@@ -1,7 +1,7 @@
-import app.msime.android.NumberPolicy;
 package app.msime.android.test;
 
 import app.msime.android.KeyboardGeometry;
+import app.msime.android.NumberPolicy;
 import java.math.BigDecimal;
 import org.json.JSONObject;
 

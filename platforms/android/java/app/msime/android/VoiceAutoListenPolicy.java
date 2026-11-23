@@ -32,4 +32,15 @@ public final class VoiceAutoListenPolicy {
     public static boolean editorAllows(int inputType) {
         return !EditorPolicy.password(inputType);
     }
+
+    /** 这次 onWindowShown 要不要排一次自动聆听：只在真正的隐藏→显示时排。键盘可见期间部分系统或宿主会重发 onWindowShown（应用重复 showSoftInput、切换编辑框时再叫窗口），用户正在打字或改稿，这时再弹语音页等于抢焦点，保持沉默。 */
+    public static boolean schedulesOnWindowShown(boolean windowAlreadyVisible) {
+        return !windowAlreadyVisible;
+    }
+
+    /** 第一帧要不要直接露出聆听面板（只画面板、不开始录音）：开关与键区内识别器就绪、编辑框允许时才画。录音是否真的开始仍由 {@link #decide} 在延迟到点按会话状态决定，画了但到点不开口时马上收回面板。 */
+    public static boolean preShowsListeningPanel(boolean enabled, boolean voiceEnabled,
+                                                 boolean inKeyboardEngine, boolean editorAllows) {
+        return enabled && voiceEnabled && inKeyboardEngine && editorAllows;
+    }
 }

@@ -41,6 +41,22 @@ public final class VoiceAutoListenPolicySmoke {
         // 延迟给首帧渲染和输入框落地留时间：不能是 0（窗口还没显示），也不该太长。
         check(VoiceAutoListenPolicy.START_DELAY_MILLIS > 0 && VoiceAutoListenPolicy.START_DELAY_MILLIS <= 1000,
             "自动开始延迟在一秒以内");
+
+        // 只在真正的隐藏→显示时排程：键盘已可见时重发的 onWindowShown 不再自动聆听。
+        check(VoiceAutoListenPolicy.schedulesOnWindowShown(false), "窗口从隐藏到显示要排自动聆听");
+        check(!VoiceAutoListenPolicy.schedulesOnWindowShown(true), "键盘可见期间的重复显示不排自动聆听");
+
+        // 面板画进第一帧的门槛与开始录音的四个前提一致，只少「会话就绪」（录音等它）。
+        check(VoiceAutoListenPolicy.preShowsListeningPanel(true, true, true, true),
+            "开关与引擎就绪时第一帧就露聆听面板");
+        check(!VoiceAutoListenPolicy.preShowsListeningPanel(false, true, true, true),
+            "本地开关关闭不预画面板");
+        check(!VoiceAutoListenPolicy.preShowsListeningPanel(true, false, true, true),
+            "语音总开关关闭不预画面板");
+        check(!VoiceAutoListenPolicy.preShowsListeningPanel(true, true, false, true),
+            "键区内没有可用引擎不预画面板");
+        check(!VoiceAutoListenPolicy.preShowsListeningPanel(true, true, true, false),
+            "密码框不预画面板");
         System.out.println("VoiceAutoListenPolicySmoke passed");
     }
 }
