@@ -69,6 +69,8 @@ public final class AndroidLocalSettings {
     public static final String VOICE_OFFLINE_FALLBACK = "platform.android.voice_offline_fallback";
 
     // ---- 只在本机的键 ----
+    /** 「进入输入框自动聆听」（#11601）：键盘弹出就按当前识别配置直接开始聆听，省掉先点一下的操作。只在键区里能跑的识别器上生效（系统识别服务不自动开始），默认关；服务端同步字段表没有这个键，只留在本机。 */
+    public static final String VOICE_AUTO_LISTEN = "platform.android.voice_auto_listen";
     /** 按键按下时是否缩小并下移 1 dp；按键动画、按键音、振动和弹出预览不受影响。 */
     public static final String PRESS_FEEDBACK = "platform.android.press_feedback";
     public static final String INCOGNITO = "platform.android.incognito";
@@ -262,6 +264,7 @@ public final class AndroidLocalSettings {
         choice(HANDWRITING_STROKE_COLOR, "follow_skin", true, "follow_skin", "black", "white", "blue");
         integer(HANDWRITING_STROKE_WIDTH, 3, true, 1, 8, 1);
         bool(VOICE_OFFLINE_FALLBACK, true, true);
+        bool(VOICE_AUTO_LISTEN, false, false);
 
         bool(PRESS_FEEDBACK, true, false);
         bool(INCOGNITO, false, false);

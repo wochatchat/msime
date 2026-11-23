@@ -2378,6 +2378,7 @@ public final class MSIMEInputService extends InputMethodService {
         hideVoiceEmptyNotice();
         // 窗口收起后不再每秒重读偏好：会话要一直活到输入框失焦，按返回键收起键盘后输入框通常还留着焦点，原先这段时间里每秒都在后台读偏好、解析皮肤、把快照推给引擎，电池统计里全算后台耗电（#9916）。窗口再显示时 onWindowShown 先读一次再接着轮询。
         imeWindowVisible = false;
+        cancelAutoListen();
         // 收起前第一帧还没交出去：不再等它，也不记这次弹出的耗时。排着的建会话马上放行，不空等兜底：它自己核对启动代次，用户收起时 onFinishInputView 已经先换了代，放行即作废；跟随光标的候选栏自己收起窗口时不换代，会话照常马上建好。
         firstFrameArmedAt = -1;
         runSessionStartAfterFirstFrame();
@@ -2390,6 +2391,7 @@ public final class MSIMEInputService extends InputMethodService {
 
     @Override public void onWindowShown() {
         super.onWindowShown();
+        boolean windowWasVisible = imeWindowVisible;
         imeWindowVisible = true;
         announceWubiTableMissing();
         if (session != 0 && !preferencesDirectory.isEmpty())
@@ -2399,6 +2401,12 @@ public final class MSIMEInputService extends InputMethodService {
         caretWindowHidden = false;
         // 系统或应用把窗口叫出来时可能正空闲（例如输入框获得焦点），按此刻的状态再收起。
         main.post(caretWindowSync);
+        // 「进入输入框自动聆听」（#11601）：开关打开且当前识别配置能在键区里跑时，键盘弹出就
+        // 直接开始一次聆听，省掉每次先点一下的操作。系统识别服务不参与（见 ImeVoiceEntry#chooseAuto），
+        // 判断不满足时保持沉默，不提示、不转交识别窗口。只在真正的隐藏→显示时排程：键盘可见期间
+        // 部分系统或宿主会重发 onWindowShown（应用重复 showSoftInput、切换编辑框时再叫窗口），
+        // 用户正在打字或改稿，这时再弹语音页等于抢焦点。
+        if (VoiceAutoListenPolicy.schedulesOnWindowShown(windowWasVisible)) scheduleAutoListen();
         // 选择页返回时，输入连接刷新可能先于窗口显示；等窗口可见再补一次原编辑器恢复。
         main.post(() -> imeWorldClock.resumePicker(getCurrentInputEditorInfo()));
     }
@@ -2406,6 +2414,7 @@ public final class MSIMEInputService extends InputMethodService {
     /** Match Apple's viewWillDisappear boundary while keeping the editor session alive. */
     private void finishInputViewPresentation() {
         // 键盘收起就停掉键盘内的语音识别：聆听面板挂在已隐藏的窗口上不会被移除，录音（豆包还在往云端推流）会一直持续到上限。
+        cancelAutoListen();
         imeVoiceEntry.cancel();
         imeLetterRows.cancelBackspaceRepeat();
         cancelInputViewRefresh();
@@ -8356,6 +8365,89 @@ public final class MSIMEInputService extends InputMethodService {
     boolean aiTargetMatches() {
         return aiTarget != null && aiTarget.matches(connection, editorContextRevision,
             editorContext(true), selectedEditorText(), editorContext(false));
+    }
+
+    /** 「进入输入框自动聆听」排着的延迟回调；没有排时为 null。收起键盘、切换输入框或用户先动了手都作废。 */
+    private Runnable autoListenPending;
+    /** 排程那一刻输入框的类型：到点时按它挡住密码框（延迟期间类型可能已更新，以排程时的为准会漏掉刚切进来的密码框，反之亦然；这里取保守值，到点时再核一遍当前编辑器）。 */
+    private int autoListenEditorType;
+    /** 这次弹出已把聆听面板画进第一帧（{@link ImeVoiceEntry#preShowAutoPanel} 返回 true）：到点时用户若已取消就不再自动开口，面板收不回时也不再留着。 */
+    private boolean autoListenPanelPending;
+
+    /**
+     * 键盘弹出后安排一次自动聆听（#11601）：延迟 {@link VoiceAutoListenPolicy#START_DELAY_MILLIS}，到点时再按当场的状态决定开始与否——输入框类型、组字、会话在延迟期间都可能变化，排程时的快照不作数。识别配置在到点时经 {@link ImeVoiceEntry#chooseAuto} 检查，不在键区里能跑的识别器（含系统识别服务）保持沉默。面板先画进这次弹出的第一帧，键盘不再先闪一下全键盘再跳到语音页；录音仍等延迟到点、会话就绪才开始。
+     */
+    private void scheduleAutoListen() {
+        cancelAutoListen();
+        EditorInfo info = getCurrentInputEditorInfo();
+        if (info == null) return;
+        autoListenEditorType = info.inputType;
+        ImeVoiceEntry.Engine engine = autoListenEngine();
+        autoListenPanelPending = VoiceAutoListenPolicy.preShowsListeningPanel(
+                localSettings.bool(AndroidLocalSettings.VOICE_AUTO_LISTEN), voiceInputEnabled,
+                engine != null, VoiceAutoListenPolicy.editorAllows(info.inputType))
+            && imeVoiceEntry.preShowAutoPanel(keyRows, engine);
+        autoListenPending = this::runAutoListen;
+        main.postDelayed(autoListenPending, VoiceAutoListenPolicy.START_DELAY_MILLIS);
+    }
+
+    private void cancelAutoListen() {
+        if (autoListenPending != null) main.removeCallbacks(autoListenPending);
+        autoListenPending = null;
+        autoListenPanelPending = false;
+        // 预画在键区上的聆听面板随排程一起作废：窗口收起或换输入框后它还挂在视图树上，留着既挡住
+        // 下一次弹出的第一帧，也占住 listening 让下一次的预画画不出来。
+        imeVoiceEntry.cancelAutoPanel();
+    }
+
+    /** 延迟到点：开关与准入在这里重查，全部通过才开始聆听。预画的面板还在就地在它上面开口；用户已收走面板就不再自动开口，到点开不了口时把预画的空面板一并收回。 */
+    private void runAutoListen() {
+        autoListenPending = null;
+        boolean panelPending = autoListenPanelPending;
+        autoListenPanelPending = false;
+        if (panelPending) {
+            // 预画的面板被用户收走（取消、键区重建）：它不等着开口，也不再自动开始。
+            if (!imeVoiceEntry.autoPanelPending()) return;
+        } else if (imeVoiceEntry.listeningActive()) {
+            return;
+        }
+        if (!voiceInsertionReady()) {
+            if (panelPending) imeVoiceEntry.cancelAutoPanel();
+            return;
+        }
+        EditorInfo info = getCurrentInputEditorInfo();
+        if (info != null) autoListenEditorType = info.inputType;
+        if (!VoiceAutoListenPolicy.editorAllows(autoListenEditorType)
+                || VoiceAutoListenPolicy.decide(localSettings.bool(AndroidLocalSettings.VOICE_AUTO_LISTEN),
+                       voiceInputEnabled, true, autoListenEngine() != null)
+                    != VoiceAutoListenPolicy.Decision.START) {
+            if (panelPending) imeVoiceEntry.cancelAutoPanel();
+            return;
+        }
+        imeDebugOverlay.recordEvent(DiagnosticEventKind.VOICE_AUTO_LISTEN);
+        imeVoiceEntry.startInKeyboard(keyRows, true);
+    }
+
+    /** 自动聆听可用的键区内引擎；系统识别服务返回 null，自动开始保持沉默。 */
+    private ImeVoiceEntry.Engine autoListenEngine() {
+        JSONObject voice = preferencesSnapshot == null ? null
+            : preferencesSnapshot.optJSONObject("preferences");
+        JSONObject input = voice == null ? null : voice.optJSONObject("voice_input");
+        if (input == null) return null;
+        VoiceConfiguration configured = VoiceConfiguration.read(preferencesDirectory,
+            "ime-auto-" + Long.toUnsignedString(SystemClock.uptimeMillis()));
+        File files = getFilesDir();
+        String fallbackModel = JsonPolicy.strictStringOrEmpty(input.opt("asr_model_path"));
+        boolean fallbackInstalled = files != null
+            && LocalAsrPolicy.usable(LocalAsrPolicy.PROVIDER, fallbackModel)
+            && LocalAsrPolicy.installed(fallbackModel, files.toPath());
+        boolean localConfigured = configured.localModel() != null;
+        boolean streamingConfigured = configured.streaming() != null;
+        boolean uploadConfigured = !localConfigured && !streamingConfigured && configured.provider() != null;
+        return ImeVoiceEntry.chooseAuto(localConfigured, streamingConfigured,
+            localConfigured || imeVoiceEntry.onlineForAutoListen(),
+            localSettings.bool(AndroidLocalSettings.VOICE_OFFLINE_FALLBACK),
+            fallbackInstalled, uploadConfigured);
     }
 
     void startVoiceRecognition() {

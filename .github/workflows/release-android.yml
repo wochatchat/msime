@@ -21,7 +21,8 @@ concurrency: {group: release-android, cancel-in-progress: false}
 jobs:
   # Resolves the dispatched commit up front, so every edition and the publish job (tag target, release notes) use the same source even if the branch moves during the run.
   source:
-    runs-on: depot-ubuntu-24.04
+    # fork 没有 depot-* runner，这个作业在 fork 上换 GitHub 托管 runner（上游保持 depot 不变）。
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -39,7 +40,8 @@ jobs:
     strategy:
       fail-fast: true
       matrix:
-        edition: [full, wubi, pinyin, japanese, vietnamese, tibetan]
+        # fork 测试构建只打 full 版（每个版本各自完整交叉编译原生库，六个版本要六倍时间；上游保持全部版本）。
+        edition: [full]
     # full 和拼音版打瘦包（build-apk.sh 的 MSIME_ANDROID_OMIT_ON_DEMAND）：日文词典、五笔码表、粤拼注音笔画语言词库、非英文离线释义和本地语音运行库都不进 APK，由应用在用户需要时作为资源包下载。日文版的主词库就是日文词典，五笔版的默认方案离不开五笔码表，其余版本没有这些附加资源，照旧按自己的资源锁打包。
     env:
       MSIME_ANDROID_OMIT_ON_DEMAND: "${{ (matrix.edition == 'full' || matrix.edition == 'pinyin') && '1' || '0' }}"
@@ -155,6 +157,8 @@ jobs:
   # 发布前在模拟器上装同一个提交打出的包跑一遍（API 28 和 35），不过就不发。0.3.0 编译、lint 全绿，装到设备上却准备不了词库。这里用开发密钥另打 x86_64 包，不接触发版密钥。
   device:
     needs: source
+    # fork 测试构建跳过模拟器回归（还要整轮 x86_64 原生交叉编译；publish=false 时它也不拦发布。上游保持开启）。
+    if: false
     uses: ./.github/workflows/android-device.yml
     with:
       ref: ${{ needs.source.outputs.sha }}

@@ -1,0 +1,78 @@
+name: Android compile check (fork)
+
+# fork 仓库没有上游组织的 depot-* 自托管 runner，Native Platform CI 的 Android 作业会永远排队。
+# 这个轻量 workflow 只跑安卓端宿主检查，全部用 GitHub 托管的 ubuntu runner：
+#   1. check-host.sh —— 宿主契约守卫 + 全量 JVM 冒烟测试（同一套门禁，NDK 缺失时 native 对齐段自动跳过）；
+#   2. Gradle 按发版同款工程编译六个版本的宿主 Java；
+#   3. lintFullRelease（只开 NewApi，拦高于 minSdk 的调用）。
+# 与上游 Android host 作业的差别只有 runner 标签：depot-ubuntu-24.04 → ubuntu-latest。
+
+on:
+  pull_request:
+  push:
+    branches: [develop]
+  workflow_dispatch:
+
+# fork 上 Native Platform CI（depot runner）永远排队且与本 workflow 无关，用独立并发组互不干扰。
+concurrency:
+  group: android-compile-check-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref_name }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  android-host:
+    name: Android host (fork runner)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Install ripgrep
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes ripgrep
+      - name: Check for a preinstalled Android NDK
+        id: ndk
+        run: |
+          if grep -qs '28.2.13676358' /usr/local/lib/android/sdk/ndk/28.2.13676358/source.properties; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Restore the pinned Android NDK
+        if: ${{ steps.ndk.outputs.present != 'true' }}
+        uses: actions/cache@v4
+        with:
+          path: /usr/local/lib/android/sdk/ndk/28.2.13676358
+          key: android-ndk-28.2.13676358-${{ runner.os }}
+      - name: Install the pinned Android NDK
+        env:
+          ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
+        run: |
+          set -euo pipefail
+          ndk="$ANDROID_SDK_ROOT/ndk/28.2.13676358"
+          if ! grep -qs '28.2.13676358' "$ndk/source.properties"; then
+            { yes || true; } | "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --install 'ndk;28.2.13676358' >/dev/null
+          fi
+          grep -q '28.2.13676358' "$ndk/source.properties"
+      - name: Check Android host contracts and JVM smoke tests
+        env:
+          ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
+        run: bash platforms/android/check-host.sh
+      - name: Compile Android host Java for every edition
+        env:
+          ANDROID_HOME: /usr/local/lib/android/sdk
+        run: >-
+          platforms/android/gradle-app/gradlew --project-dir platforms/android/gradle-app --console=plain
+          compileFullReleaseJavaWithJavac compilePinyinReleaseJavaWithJavac compileWubiReleaseJavaWithJavac
+          compileJapaneseReleaseJavaWithJavac compileVietnameseReleaseJavaWithJavac compileTibetanReleaseJavaWithJavac
+      - name: Check Android API levels against minSdk
+        env:
+          ANDROID_HOME: /usr/local/lib/android/sdk
+        run: >-
+          platforms/android/gradle-app/gradlew --project-dir platforms/android/gradle-app --console=plain
+          lintFullRelease
