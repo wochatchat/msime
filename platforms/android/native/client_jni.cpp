@@ -1393,6 +1393,10 @@ JNIEXPORT jbyteArray JNICALL Java_app_msime_android_NativeClient_accountNameRaw(
 JNIEXPORT jbyteArray JNICALL Java_app_msime_android_NativeClient_accountRaw(JNIEnv *env, jclass, jbyteArray request) {
     return bounded_request(env, request, kAccountRequestLimit, msime_client_account);
 }
+// Google 浏览器登录的回环判定（GoogleBrowserSignIn）。reply 的请求带着一次回跳的请求头（上限 8 KiB）加 JSON 转义，与 msime_client_google_loopback 的 MAX_REQUEST_BYTES 一致。
+JNIEXPORT jbyteArray JNICALL Java_app_msime_android_NativeClient_googleLoopbackRaw(JNIEnv *env, jclass, jbyteArray request) {
+    return bounded_request(env, request, 32 * 1024, msime_client_google_loopback);
+}
 JNIEXPORT jbyteArray JNICALL Java_app_msime_android_NativeClient_accountAccessTokenRaw(JNIEnv *env, jclass, jbyteArray request) {
     return bounded_request(env, request, kAccountAccessTokenRequestLimit, msime_client_account_access_token);
 }

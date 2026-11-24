@@ -35,6 +35,13 @@
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="${applicationId}" android:host="auth" android:path="/apple" />
             </intent-filter>
+            <!-- Google 浏览器登录的回跳页「回到水杉输入法」按钮：登录结果本身走本机回环（GoogleBrowserSignIn），这个链接只负责把应用带回前台。 -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="${applicationId}" android:host="auth" android:path="/google" />
+            </intent-filter>
         </activity>
         <!-- 图标只切换别名，真实宿主始终启用；禁用真实 Activity 会让系统稍后把经别名打开的页面也关闭。 -->
         <activity-alias android:name=".MainActivityClassic" android:targetActivity="app.msime.android.home.HomeActivity" android:icon="@drawable/app_icon_classic" android:roundIcon="@drawable/app_icon_classic_round" android:enabled="true" android:exported="true"><intent-filter><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.LAUNCHER" /></intent-filter></activity-alias>
