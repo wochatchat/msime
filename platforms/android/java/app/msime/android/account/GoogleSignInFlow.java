@@ -38,12 +38,10 @@ public final class GoogleSignInFlow {
      *
      * <p>取消和配置错误不是一件事：前者是用户的决定，后者是这台设备上这个 app 根本拿不到令牌。原来两者都写成「没有完成」，于是屏幕上那句话对任何一种情况都成立，也就什么都没说——查一次得去翻 logcat。类型和原文都带上，代价是一句长一点的话。
      *
-     * <p>取消以外的失败都在 logcat 里留一行异常类型和消息：`NoCredentialException` 在屏幕上只带状态码（{@link GoogleSignInFailure}），完整的 Play services 消息只在这里。消息是 Play services 的状态说明，不含账号、令牌或 nonce。
+     * <p>失败都在 logcat 里留一行异常类型和消息（用户取消已改道 {@link Listener#onCancelled}，到不了这里）：`NoCredentialException` 在屏幕上只带状态码（{@link GoogleSignInFailure}），完整的 Play services 消息只在这里。消息是 Play services 的状态说明，不含账号、令牌或 nonce。
      */
     private static String explain(GetCredentialException error) {
-        if (error instanceof androidx.credentials.exceptions.GetCredentialCancellationException) {
-            return "已取消 Google 登录";
-        }
+        // 用户取消在 onError 里已经改道 onCancelled，到不了这里。
         Log.w(TAG, "Google sign-in failed: " + error.getType() + ": " + error.getMessage());
         if (error instanceof androidx.credentials.exceptions.NoCredentialException) {
             return GoogleSignInFailure.noCredential(error.getMessage());
@@ -80,6 +78,9 @@ public final class GoogleSignInFlow {
         void onToken(String idToken);
 
         void onFailure(String message);
+
+        /** 用户自己关掉了账号选择：不是失败，也不该触发任何后备流程。 */
+        default void onCancelled() {}
     }
 
     /**
@@ -121,6 +122,11 @@ public final class GoogleSignInFlow {
                 }
 
                 @Override public void onError(GetCredentialException error) {
+                    // 用户自己关掉了账号选择：不是失败，也不能触发浏览器回退（那会突然开一个浏览器页面）。
+                    if (error instanceof androidx.credentials.exceptions.GetCredentialCancellationException) {
+                        listener.onCancelled();
+                        return;
+                    }
                     listener.onFailure(explain(error));
                 }
             });

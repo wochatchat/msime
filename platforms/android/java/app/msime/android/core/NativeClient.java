@@ -735,6 +735,9 @@ public final class NativeClient {
     /** 账号操作（{@code msime_client_account}），请求带 {@code session_store}。除 status 和 forget 外都阻塞网络，经存储的调用都不能放在主线程上。 */
     static String account(String request) { return TextPolicy.utf8(accountRaw(utf8(request))); }
 
+    /** Google 浏览器登录的回环判定（{@code msime_client_google_loopback}）的 target/plan/reply 三个操作，见 {@code GoogleBrowserSignIn}。阻塞在回环请求的读写上（毫秒级）。 */
+    static String googleLoopback(String request) { return TextPolicy.utf8(googleLoopbackRaw(utf8(request))); }
+
     /** 登录的优先、否则匿名账号的访问令牌（{@code msime_client_account_access_token}）。可能刷新令牌、阻塞网络；回复含凭据，不要写进日志。 */
     static String accountAccessToken(String request) { return TextPolicy.utf8(accountAccessTokenRaw(utf8(request))); }
 
@@ -1358,6 +1361,7 @@ public final class NativeClient {
     private static native byte[] clientAgentRaw(byte[] request);
     private static native byte[] accountNameRaw(byte[] request);
     private static native byte[] accountRaw(byte[] request);
+    private static native byte[] googleLoopbackRaw(byte[] request);
     private static native byte[] accountAccessTokenRaw(byte[] request);
     private static native byte[] accountCloudClipboardRaw(byte[] request);
     private static native byte[] accountChatStreamRaw(byte[] request, ChatDelta listener);

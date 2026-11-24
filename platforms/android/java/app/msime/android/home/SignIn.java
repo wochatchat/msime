@@ -11,6 +11,8 @@ import app.msime.android.AppleWebSignIn;
 import app.msime.android.BackendAccount;
 import app.msime.android.CloudApi;
 import app.msime.android.DeviceDataApi;
+import app.msime.android.GoogleBrowserPolicy;
+import app.msime.android.GoogleBrowserSignIn;
 import app.msime.android.GoogleSignInFlow;
 import app.msime.android.MainThreadPolicy;
 import app.msime.android.R;
@@ -117,11 +119,77 @@ final class SignIn {
                         }
 
                         @Override public void onFailure(String message) {
-                            activity.runOnUiThread(() -> finished.accept(message));
+                            // Credential Manager 校验调用方的包名与签名证书：fork 自签的安装包没登记进后端 Google 项目的 Android OAuth client（28444），不带 Play services 的设备连凭据提供方都没有。这类失败改走浏览器回环（RFC 8252，与桌面和鸿蒙同一条链路）：授权代理是真正的浏览器，Google 不校验本包签名。回环 challenge 只支持登录；关联流程原样报错。
+                            if (!"login".equals(purpose)) {
+                                activity.runOnUiThread(() -> finished.accept(message));
+                                return;
+                            }
+                            startGoogleBrowser(activity, finished);
+                        }
+
+                        @Override public void onCancelled() {
+                            activity.runOnUiThread(() -> finished.accept(GoogleBrowserPolicy.cancelledMessage()));
                         }
                     });
             });
         });
+    }
+
+    /** 等浏览器回环登录结果的那个界面；结果到达时在主线程上收到空字符串（成功）或失败说明。只此一个，新流程覆盖旧流程。 */
+    private static Consumer<String> googleBrowserWaiter;
+
+    /**
+     * Google 的浏览器回环那一路（{@link GoogleBrowserSignIn}）：本机监听 127.0.0.1、系统浏览器打开后端生成的授权页、回跳的授权码换会话。阻塞步骤在工作线程上；结果经 {@link #googleBrowserWaiter} 在主线程上交回。面板关掉（{@link LoginSheet} 的 dismiss 调 {@link #stopWaitingForGoogleBrowser}）或又发起了新的一次登录后，晚到的结果不再打扰界面，登录本身仍会完成。
+     */
+    static void startGoogleBrowser(Activity activity, Consumer<String> finished) {
+        googleBrowserWaiter = finished;
+        Context context = activity.getApplicationContext();
+        offMainThread(() -> {
+            try {
+                GoogleBrowserSignIn.signIn(activity, new GoogleBrowserSignIn.Listener() {
+                    @Override public void onCode(GoogleBrowserSignIn.Completed completed) {
+                        settleGoogleBrowser(finished, completeGoogleBrowser(context,
+                            completed.challengeId(), completed.code()));
+                    }
+
+                    @Override public void onFailure(String message) {
+                        settleGoogleBrowser(finished, message);
+                    }
+                });
+            } catch (Exception | LinkageError error) {
+                settleGoogleBrowser(finished, SignInFailurePolicy.login(AccountStore.code(error)));
+            }
+        });
+    }
+
+    /** 不再等浏览器回环登录的界面结果（登录面板关了）。晚到的授权码仍会完成登录，只是没有界面再收结果。 */
+    static void stopWaitingForGoogleBrowser(Consumer<String> waiter) {
+        if (googleBrowserWaiter == waiter) googleBrowserWaiter = null;
+    }
+
+    /** 浏览器回环登录的结果交给还在等待的那个界面；等的人已经换了（又发起了一次登录）就不打扰。googleBrowserWaiter 只在主线程上读写。 */
+    private static void settleGoogleBrowser(Consumer<String> mine, String result) {
+        MAIN.post(() -> {
+            if (googleBrowserWaiter == mine) {
+                googleBrowserWaiter = null;
+                mine.accept(result);
+            }
+        });
+    }
+
+    /**
+     * 完成 Google 浏览器回环登录：用回跳带来的授权码换会话（Rust 的 `google_code_login`，会话由 Rust 保存）。阻塞，不要在主线程调用。成功返回空字符串，否则给人看的一句话。
+     */
+    static String completeGoogleBrowser(Context context, String challengeId, String code) {
+        try {
+            synchronized (SyncSwitch.bindingLock()) {
+                new BackendAccount(context).loginWithGoogleCode(challengeId, code);
+                bind(context, "google");
+            }
+            return "";
+        } catch (Exception | LinkageError error) {
+            return SignInFailurePolicy.login(AccountStore.code(error));
+        }
     }
 
     /**

@@ -82,6 +82,8 @@ final class LoginSheet {
     private final LinearLayout email;
     private final TextView status;
     private final Consumer<String> appleResult;
+    /** Google 登录的结果把手；浏览器回环的结果晚到时按它对上还要不要交（dismiss 或新登录后就不交了）。 */
+    private Consumer<String> googleResult;
     private final LoginConsentPolicy consent = new LoginConsentPolicy();
     private final CheckBox consentBox;
     private final TextView consentPrompt;
@@ -120,7 +122,6 @@ final class LoginSheet {
         this.finished = finished;
         dialog = SheetDialog.create(activity);
         appleResult = this::finishWith;
-
         LinearLayout root = LayoutPolicy.column(activity);
         ViewPolicy.setPaddingDp(activity, root, 24, 0, 24, 20);
         root.addView(LayoutPolicy.sheetDragHandle(activity));
@@ -181,6 +182,7 @@ final class LoginSheet {
         dialog.setContentView(scroll);
         dialog.setOnDismissListener(ignored -> {
             SignIn.stopWaitingForApple(appleResult);
+            SignIn.stopWaitingForGoogleBrowser(googleResult);
             if (!done) {
                 done = true;
                 finished.accept(CANCELLED);
@@ -200,7 +202,9 @@ final class LoginSheet {
 
     private void google() {
         if (!confirmConsent() || !begin("正在登录…")) return;
-        SignIn.startGoogle(activity, purpose, this::finishWith);
+        // finishWith 每次引用都不同，dismiss 的取消要对上同一次登录，所以记下来。
+        googleResult = this::finishWith;
+        SignIn.startGoogle(activity, purpose, googleResult);
     }
 
     private void expandEmail() {

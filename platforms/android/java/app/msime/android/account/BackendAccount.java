@@ -206,6 +206,30 @@ public final class BackendAccount {
             .put("challenge_id", challenge.id()).put("id_token", idToken).put("purpose", challenge.purpose()));
     }
 
+    /** Google 浏览器登录（RFC 8252 回环回跳）的一次 challenge：后端生成、Rust 校验过指向 `target` 的授权链接，只支持登录（后端不接受 link 的回环 challenge）。 */
+    public record LoopbackChallenge(String challengeId, String authorizationUrl, long expiresIn) {}
+
+    /** 开始 Google 浏览器登录：向后端要指向 `target`（本机回跳地址）的授权链接。阻塞。 */
+    public LoopbackChallenge googleLoopbackChallenge(String target) throws Exception {
+        if (target == null || target.isEmpty()) throw new IllegalArgumentException("invalid target");
+        JSONObject challenge = object(sessions.account(new JSONObject().put("operation", "google_challenge")
+            .put("target", target)));
+        String id = JsonPolicy.strictStringOrEmpty(challenge.opt("challengeId"));
+        String url = JsonPolicy.strictStringOrEmpty(challenge.opt("authorizationUrl"));
+        long expiresIn = challenge.optLong("expiresIn");
+        if (id.isEmpty() || url.isEmpty()) throw new IllegalStateException("challenge unavailable");
+        return new LoopbackChallenge(id, url, expiresIn);
+    }
+
+    /** 用浏览器回跳带来的授权码完成登录（`google_code_login`），会话由 Rust 保存。阻塞。 */
+    public void loginWithGoogleCode(String challengeId, String code) throws Exception {
+        if (!owner) throw new IllegalStateException("account session owner");
+        if (challengeId == null || challengeId.isEmpty() || code == null || code.isEmpty())
+            throw new IllegalArgumentException("invalid code");
+        sessions.account(new JSONObject().put("operation", "google_code_login")
+            .put("challenge_id", challengeId).put("code", code));
+    }
+
     /**
      * 请服务端给这个邮箱发一封 6 位验证码。
      *
